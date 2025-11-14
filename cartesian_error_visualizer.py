@@ -6,11 +6,15 @@ Subscribes to Twist messages on cartesian error topics and plots them in real-ti
 
 import rclpy
 from rclpy.node import Node
+from rclpy.parameter_client import AsyncParameterClient
 from geometry_msgs.msg import Twist
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from collections import deque
 import numpy as np
+
+DEFAULT_POSITION_DEADBAND = 0.005 # 5 millimeters
+DEFAULT_ROTATION_DEADBAND = 0.02  # ~1 degree
 
 
 class CartesianErrorVisualizer(Node):
@@ -40,6 +44,37 @@ class CartesianErrorVisualizer(Node):
         
         # Time tracking
         self.start_time = self.get_clock().now()
+
+        self.get_logger().info("Waiting for interface node parameters...")
+        # Create a client to talk to the parameter server of another node
+        self.param_client = AsyncParameterClient(self, 'eddie_ros_interface')
+        if not self.param_client.wait_for_services(timeout_sec=5.0):
+            self.get_logger().error("Parameter service for 'eddie_ros_interface' not available. Using default deadbands.")
+            self.position_deadband = DEFAULT_POSITION_DEADBAND # Fallback defaults
+            self.rotation_deadband = DEFAULT_ROTATION_DEADBAND
+        else:
+            self.get_logger().info("Fetching PID deadband parameters asynchronously...")
+            future_pos = self.param_client.get_parameters(['pid.right.pos.deadband'])
+            future_rot = self.param_client.get_parameters(['pid.right.rot.deadband'])
+            # Use a callback to set the parameters
+            def pos_done(fut):
+                params = fut.result().values
+                if params:
+                    self.position_deadband = params[0].value
+                    self.get_logger().info(f"Using Position Deadband: {self.position_deadband}")
+                else:
+                    self.position_deadband = DEFAULT_POSITION_DEADBAND
+                    self.get_logger().warn("Could not fetch position deadband, using default.")
+            def rot_done(fut):
+                params = fut.result().values
+                if params:
+                    self.rotation_deadband = params[0].value
+                    self.get_logger().info(f"Using Rotation Deadband: {self.rotation_deadband}")
+                else:
+                    self.rotation_deadband = DEFAULT_ROTATION_DEADBAND
+                    self.get_logger().warn("Could not fetch rotation deadband, using default.")
+            future_pos.add_done_callback(pos_done)
+            future_rot.add_done_callback(rot_done)
         
         # Create subscribers
         self.right_sub = self.create_subscription(
@@ -108,6 +143,7 @@ def main(args=None):
     ax_right_linear_x.grid(True, alpha=0.3)
     ax_right_linear_x.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
     line_right_x, = ax_right_linear_x.plot([], [], 'r-', label='X', linewidth=1.5)
+    ax_right_linear_x.axhspan(-visualizer.position_deadband, visualizer.position_deadband, facecolor='green', alpha=0.2, label='Position Deadband')
     ax_right_linear_x.legend(loc='upper right')
 
     ax_right_linear_y = axes[1]
@@ -117,6 +153,7 @@ def main(args=None):
     ax_right_linear_y.grid(True, alpha=0.3)
     ax_right_linear_y.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
     line_right_y, = ax_right_linear_y.plot([], [], 'g-', label='Y', linewidth=1.5)
+    ax_right_linear_y.axhspan(-visualizer.position_deadband, visualizer.position_deadband, facecolor='green', alpha=0.2, label='Position Deadband')
     ax_right_linear_y.legend(loc='upper right')
 
     ax_right_linear_z = axes[2]
@@ -126,6 +163,7 @@ def main(args=None):
     ax_right_linear_z.grid(True, alpha=0.3)
     ax_right_linear_z.axhline(y=0, color='black', linestyle='-', linewidth=1, alpha=0.5)
     line_right_z, = ax_right_linear_z.plot([], [], 'b-', label='Z', linewidth=1.5)
+    ax_right_linear_z.axhspan(-visualizer.position_deadband, visualizer.position_deadband, facecolor='green', alpha=0.2, label='Position Deadband')
     ax_right_linear_z.legend(loc='upper right')
 
     # Configure subplots
@@ -182,6 +220,7 @@ def main(args=None):
     # ax_left_angular.legend(loc='upper right')
     
     plt.tight_layout()
+    #plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     
     def update_plot(frame):
         """Animation update function"""
@@ -194,12 +233,16 @@ def main(args=None):
             line_right_y.set_data(list(visualizer.right_time), list(visualizer.right_linear_y))
             line_right_z.set_data(list(visualizer.right_time), list(visualizer.right_linear_z))
             
-            ax_right_linear_x.relim()
-            ax_right_linear_x.autoscale_view()
-            ax_right_linear_y.relim()
-            ax_right_linear_y.autoscale_view()
-            ax_right_linear_z.relim()
-            ax_right_linear_z.autoscale_view()
+            #ax_right_linear_x.relim()
+            #ax_right_linear_x.autoscale_view()
+            #ax_right_linear_y.relim()
+            #ax_right_linear_y.autoscale_view()
+            #ax_right_linear_z.relim()
+            #ax_right_linear_z.autoscale_view()
+
+            for ax in axes:
+                ax.relim()
+                ax.autoscale_view()
 
         #     # Auto-scale axes
         #     ax_right_linear.relim()
